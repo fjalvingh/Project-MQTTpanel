@@ -4,6 +4,7 @@
 
 # Project - MQTT RGB matrix panel
 This repository contains all the development files, (Python & C), to create your own MQTT based RGB matrix panel. Should take you under an hour to get this up and running from scratch.
+It is a copy of mickmake's original, adapted for the newer versions of hzeller/rpi-rgb-led-matrix. It also implements a new command to allow .gif files to be sent as mqtt payloads, so that the gifs do not need to be present in the docker image.
 
 
 ## Quick install (for the impatient)
@@ -48,6 +49,7 @@ Publish MQTT messages using this container:
 ## Available MQTT messages:
 * /display/panel/brightness - Adjust the birghtness of the panel, (0 to 100).
 * /display/background/load - Load a different background image from the images directory, (/usr/local/share/rgbmatrix/images).
+* /display/background/bitmap - Load a different background .gif, from the mqtt payload (send using -f).
 
 * /display/time/format - Change the time display format, (uses strftime).
 * /display/time/show - Enable or disable time display.
