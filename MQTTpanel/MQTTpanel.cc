@@ -29,12 +29,14 @@ extern "C"
 
 #include "led-matrix.h"
 #include "graphics.h"
-#include "transformer.h"
+//#include "transformer.h"
 #include "content-streamer.h"
 #include "json.h"
 #include "json_util.h"
 #include "mosquitto.h"
 #include "led-matrix.h"
+#include "pixel-mapper.h"
+#include "gpio.h"
 
 #define mqtt_host "localhost"
 #define mqtt_port 1883
@@ -514,10 +516,13 @@ int initPanel(int argc, char *argv[])
 
 		if (!json_object_object_get_ex(rootObject, "timezone", &keyObject))
 		{
-			keyObject = json_object_new_string(getenv("TZ"));
+			char* tz = getenv("TZ");
+			if(NULL == tz)
+				tz = "Europe/Amsterdam";
+			keyObject = json_object_new_string(tz);
 			json_object_object_add(rootObject, "timezone", keyObject);
 		}
-		displayTime.timezone = json_object_get_boolean(keyObject);
+		displayTime.timezone = json_object_get_string(keyObject);
 	}
 	// printf("JSON(time):%s\n", json_object_get_string(rootObject));
 
@@ -577,10 +582,13 @@ int initPanel(int argc, char *argv[])
 
 		if (!json_object_object_get_ex(rootObject, "timezone", &keyObject))
 		{
-			keyObject = json_object_new_string(getenv("TZ"));
+			char* tz = getenv("TZ");
+			if(NULL == tz)
+				tz = "Europe/Amsterdam";
+			keyObject = json_object_new_string(tz);
 			json_object_object_add(rootObject, "timezone", keyObject);
 		}
-		displayDate.timezone = json_object_get_boolean(keyObject);
+		displayDate.timezone = json_object_get_string(keyObject);
 	}
 	// printf("JSON(date):%s\n", json_object_get_string(rootObject));
 
@@ -652,7 +660,7 @@ int initPanel(int argc, char *argv[])
 	}
 
 	// Prepare matrix
-	canvas = CreateMatrixFromOptions(panelOptions, runtime_opt);
+	canvas = RGBMatrix::CreateFromOptions(panelOptions, runtime_opt);
 	if (canvas == NULL)
 		return 1;
 
@@ -665,7 +673,10 @@ int initPanel(int argc, char *argv[])
 
 	if (angle >= -360)
 	{
-		canvas->ApplyStaticTransformer(rgb_matrix::RotateTransformer(angle));
+		std::string s = std::to_string(angle);
+		char const* pchar = s.c_str();
+		canvas->ApplyPixelMapper(rgb_matrix::FindPixelMapper("Rotate", 0, 0, pchar));
+//		canvas->ApplyStaticTransformer(rgb_matrix::RotateTransformer(angle));
 	}
 
 	offscreen_canvas = canvas->CreateFrameCanvas();
@@ -877,7 +888,7 @@ void DisplayAnimation(RGBMatrix *matrix, FrameCanvas *offscreen_canvas, int vsyn
 			// Display the time.
 			if (displayTime.show)
 			{
-				setenv("TZ", displayTime.zone, 1);
+				setenv("TZ", displayTime.timezone, 1);
 				tzset();
 				time(&rawtime);
 				now = localtime(&rawtime);
@@ -891,7 +902,7 @@ void DisplayAnimation(RGBMatrix *matrix, FrameCanvas *offscreen_canvas, int vsyn
 			// Display the date.
 			if (displayDate.show)
 			{
-				setenv("TZ", displayDate.zone, 1);
+				setenv("TZ", displayDate.timezone, 1);
 				tzset();
 				time(&rawtime);
 				now = localtime(&rawtime);
@@ -1035,7 +1046,7 @@ void message_callback(struct mosquitto *mosq, void *obj, const struct mosquitto_
 		convRGBstr((char *)message->payload, &displayTime.red, &displayTime.green, &displayTime.blue);
 
 	mosquitto_topic_matches_sub("/display/time/zone", message->topic, &match);
-	if (match)strcpy
+	if (match)
 		strcpy((char *)displayTime.timezone, (char *)message->payload);
 
 
@@ -1072,7 +1083,7 @@ void message_callback(struct mosquitto *mosq, void *obj, const struct mosquitto_
 		convRGBstr((char *)message->payload, &displayDate.red, &displayDate.green, &displayDate.blue);
 
 	mosquitto_topic_matches_sub("/display/date/zone", message->topic, &match);
-	if (match)strcpy
+	if (match)
 		strcpy((char *)displayDate.timezone, (char *)message->payload);
 
 
