@@ -121,6 +121,7 @@ int angle = -361;
 static int usage(const char *progname);
 static tmillis_t GetTimeInMillis();
 static bool LoadImageAndScale(const char *filename, int target_width, int target_height, bool fill_width, bool fill_height, std::vector<Magick::Image> *result, std::string *err_msg);
+static bool LoadBlobAndScale(Magick::Blob& blob, int target_width, int target_height, bool fill_width, bool fill_height, std::vector<Magick::Image> *result, std::string *err_msg);
 void LoadImage(const char *filename);
 static void StoreInStream(const Magick::Image &img, int delay_time_us, bool do_center, rgb_matrix::FrameCanvas *scratch, rgb_matrix::StreamWriter *output);
 void DisplayAnimation(RGBMatrix *matrix, FrameCanvas *offscreen_canvas, int vsync_multiple);
@@ -765,6 +766,43 @@ void LoadImage(const char *filename)
 }
 
 
+void LoadBlob(Magick::Blob& blob)
+{
+	// These parameters are needed once we do scrolling.
+	const bool fill_width = false;
+	const bool fill_height = false;
+
+	chdir(displayImage.dir);
+	std::string err_msg;
+	std::vector<Magick::Image> image_sequence;
+	printf("Loading blob");
+	if (LoadBlobAndScale(blob, canvas->width(), canvas->height(), fill_width, fill_height, &image_sequence, &err_msg))
+	{
+		content_stream = new rgb_matrix::MemStreamIO();
+		bgImage.is_multi_frame = image_sequence.size() > 1;
+		rgb_matrix::StreamWriter out(content_stream);
+		for (size_t i = 0; i < image_sequence.size(); ++i)
+		{
+			const Magick::Image &img = image_sequence[i];
+			int64_t delay_time_us;
+			if (bgImage.is_multi_frame)
+				delay_time_us = img.animationDelay() * 10000; // unit in 1/100s
+			else
+				delay_time_us = bgImage.wait_ms * 1000;  // single image.
+			if (delay_time_us <= 0) delay_time_us = 100 * 1000;  // 1/10sec
+				StoreInStream(img, delay_time_us, do_center, offscreen_canvas, global_stream_writer ? global_stream_writer : &out);
+			printf(".");
+		}
+		printf(".Done\n");
+	}
+	else
+		printf(".Not done.\n");
+}
+
+
+
+
+
 // ################################################################################
 static tmillis_t GetTimeInMillis()
 {
@@ -804,25 +842,8 @@ static void StoreInStream(const Magick::Image &img, int delay_time_us, bool do_c
 }
 
 
-// Load still image or animation.
-// Scale, so that it fits in "width" and "height" and store in "result".
-static bool LoadImageAndScale(const char *filename, int target_width, int target_height, bool fill_width, bool fill_height, std::vector<Magick::Image> *result, std::string *err_msg)
-{
-	std::vector<Magick::Image> frames;
-	try
-	{
-		readImages(&frames, filename);
-	}
-	catch (std::exception& e)
-	{
-		if (e.what()) *err_msg = e.what();
-			return false;
-	}
-	if (frames.size() == 0)
-	{
-		fprintf(stderr, "No image found.");
-		return false;
-	}
+
+static bool handleImageAndScale(std::vector<Magick::Image> frames, int target_width, int target_height, bool fill_width, bool fill_height, std::vector<Magick::Image> *result, std::string *err_msg) {
 
 	// Put together the animation from single frames. GIFs can have nasty
 	// disposal modes, but they are handled nicely by coalesceImages()
@@ -862,6 +883,54 @@ static bool LoadImageAndScale(const char *filename, int target_width, int target
 	}
 
 	return true;
+}
+
+
+// Load still image or animation.
+// Scale, so that it fits in "width" and "height" and store in "result".
+static bool LoadImageAndScale(const char *filename, int target_width, int target_height, bool fill_width, bool fill_height, std::vector<Magick::Image> *result, std::string *err_msg)
+{
+	std::vector<Magick::Image> frames;
+	try
+	{
+		readImages(&frames, filename);
+	}
+	catch (std::exception& e)
+	{
+		if (e.what()) *err_msg = e.what();
+			return false;
+	}
+	if (frames.size() == 0)
+	{
+		fprintf(stderr, "No image found.");
+		return false;
+	}
+	return handleImageAndScale(frames, target_width, target_height, fill_width, fill_height, result, err_msg);
+
+}
+
+
+// Load still image or animation.
+// Scale, so that it fits in "width" and "height" and store in "result".
+static bool LoadBlobAndScale(Magick::Blob& blob, int target_width, int target_height, bool fill_width, bool fill_height, std::vector<Magick::Image> *result, std::string *err_msg)
+{
+	std::vector<Magick::Image> frames;
+	try
+	{
+		readImages(&frames, blob);
+	}
+	catch (std::exception& e)
+	{
+		if (e.what()) *err_msg = e.what();
+			return false;
+	}
+	if (frames.size() == 0)
+	{
+		fprintf(stderr, "No image found.");
+		return false;
+	}
+	return handleImageAndScale(frames, target_width, target_height, fill_width, fill_height, result, err_msg);
+
 }
 
 
@@ -1010,6 +1079,13 @@ void message_callback(struct mosquitto *mosq, void *obj, const struct mosquitto_
 	{
 		displayImage.image = (char *)message->payload;
 		LoadImage(displayImage.image);
+	}
+
+	mosquitto_topic_matches_sub("/display/background/bitmap", message->topic, &match);
+	if (match)
+	{
+		Magick::Blob blob = Magick::Blob(message->payload, message->payloadlen);
+		LoadBlob(blob);
 	}
 
 
